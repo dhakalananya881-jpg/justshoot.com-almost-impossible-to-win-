@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Arcade Shooter – Boss Fight</title>
+<style>
+body{margin:0;background:black;overflow:hidden;color:white;font-family:Arial}
+canvas{display:block;margin:auto;background:#111;border:2px solid red}
+#ui{position:absolute;top:10px;left:10px}
+.bar{width:180px;height:14px;background:#400;margin-bottom:6px}
+.inner{height:100%;background:lime}
+
+.ctrl{
+ width:90px;height:60px;font-size:18px;
+ background:#222;border:2px solid #666;color:white;
+ border-radius:10px;touch-action:none;
+}
+#left{position:fixed;bottom:10px;left:10px}
+#right{position:fixed;bottom:10px;left:110px}
+#shoot{position:fixed;bottom:10px;right:10px;cursor:grab}
+
+#overlay{
+ position:fixed;inset:0;background:rgba(0,0,0,.85);
+ display:none;align-items:center;justify-content:center;
+ flex-direction:column;font-size:28px
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+ HP
+ <div class="bar"><div id="php" class="inner"></div></div>
+ Boss HP
+ <div class="bar"><div id="bhp" class="inner"></div></div>
+</div>
+
+<canvas id="game" width="500" height="650"></canvas>
+
+<button class="ctrl" id="left">◀</button>
+<button class="ctrl" id="right">▶</button>
+<button class="ctrl" id="shoot">🔥</button>
+
+<div id="overlay">
+ <div id="msg"></div>
+ <button onclick="location.reload()">Restart</button>
+</div>
+
+<script>
+// ================= CORE =================
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ================= PLAYER =================
+const PLAYER_HP = 100;
+const PLAYER_DAMAGE = 10;
+
+const player = {
+ x:230, y:580, w:40, h:40,
+ hp:PLAYER_HP, speed:6
+};
+
+// ================= BOSS (100x STRONGER) =================
+const BOSS_HP = PLAYER_HP * 100;
+
+let boss = {
+ x:100, y:40, w:300, h:90,
+ hp:BOSS_HP,
+ dir:1,
+ dying:false,
+ deathTimer:180,
+ shootCooldown:0
+};
+
+// ================= STATE =================
+let bullets = [];
+let bossBullets = [];
+let explosions = [];
+let fireCD = 0;
+let shake = 0;
+let gameOver = false;
+
+// ================= INPUT =================
+let L=false,R=false,S=false;
+
+document.addEventListener("keydown",e=>{
+ if(e.key==="a"||e.key==="A") L=true;
+ if(e.key==="d"||e.key==="D") R=true;
+ if(e.key==="Enter") S=true;
+});
+document.addEventListener("keyup",e=>{
+ if(e.key==="a"||e.key==="A") L=false;
+ if(e.key==="d"||e.key==="D") R=false;
+ if(e.key==="Enter") S=false;
+});
+
+left.onpointerdown=()=>L=true;
+left.onpointerup=()=>L=false;
+right.onpointerdown=()=>R=true;
+right.onpointerup=()=>R=false;
+shoot.onpointerdown=()=>S=true;
+shoot.onpointerup=()=>S=false;
+
+// Drag shoot button
+let drag=false,dx=0,dy=0;
+shoot.onpointerdown=e=>{
+ drag=true;
+ dx=e.clientX-shoot.offsetLeft;
+ dy=e.clientY-shoot.offsetTop;
+ shoot.setPointerCapture(e.pointerId);
+};
+shoot.onpointermove=e=>{
+ if(!drag) return;
+ shoot.style.left=(e.clientX-dx)+"px";
+ shoot.style.top=(e.clientY-dy)+"px";
+ shoot.style.right="auto";
+ shoot.style.bottom="auto";
+};
+shoot.onpointerup=()=>drag=false;
+
+// ================= HELPERS =================
+const hit=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+
+// ================= SHOOT =================
+function shootGun(){
+ if(fireCD>0) return;
+ fireCD=8;
+ bullets.push({
+  x:player.x+18,
+  y:player.y,
+  w:6,h:12,
+  s:12,
+  dmg:PLAYER_DAMAGE
+ });
+}
+
+// ================= BOSS SHOOT =================
+function bossShoot(){
+ if(boss.shootCooldown>0 || boss.dying) return;
+ boss.shootCooldown = 40;
+
+ const bx = boss.x + boss.w/2;
+ const by = boss.y + boss.h;
+ const px = player.x + player.w/2;
+ const py = player.y;
+
+ const angle = Math.atan2(py-by, px-bx);
+ const speed = 5;
+
+ bossBullets.push({
+  x:bx, y:by, w:8, h:8,
+  vx:Math.cos(angle)*speed,
+  vy:Math.sin(angle)*speed,
+  dmg:15
+ });
+}
+
+// ================= UPDATE =================
+function update(){
+ if(gameOver) return;
+
+ if(L) player.x=Math.max(0,player.x-player.speed);
+ if(R) player.x=Math.min(460,player.x+player.speed);
+ if(S) shootGun();
+ if(fireCD>0) fireCD--;
+
+ // Player bullets
+ bullets.forEach((b,i)=>{
+  b.y-=b.s;
+  if(b.y<0) bullets.splice(i,1);
+ });
+
+ // Boss movement
+ if(!boss.dying){
+  boss.x+=boss.dir*4;
+  if(boss.x<0||boss.x+boss.w>500) boss.dir*=-1;
+  bossShoot();
+ }
+
+ // Boss bullets
+ bossBullets.forEach((b,i)=>{
+  b.x+=b.vx;
+  b.y+=b.vy;
+  if(b.y>700||b.x<0||b.x>500) bossBullets.splice(i,1);
+  if(hit(b,player)){
+   player.hp-=b.dmg;
+   bossBullets.splice(i,1);
+   shake=10;
+  }
+ });
+
+ // Bullet hits boss
+ bullets.forEach((b,i)=>{
+  if(!boss.dying && hit(b,boss)){
+   boss.hp-=b.dmg;
+   bullets.splice(i,1);
+   explosions.push({x:b.x,y:b.y,r:0});
+   shake=12;
+   if(boss.hp<=0){
+    boss.hp=0;
+    boss.dying=true;
+   }
+  }
+ });
+
+ // Boss death
+ if(boss.dying){
+  boss.deathTimer--;
+  if(boss.deathTimer%8===0){
+   explosions.push({
+    x:boss.x+Math.random()*boss.w,
+    y:boss.y+Math.random()*boss.h,
+    r:0
+   });
+   shake=18;
+  }
+  if(boss.deathTimer<=0){
+   show("BOSS DEFEATED");
+  }
+ }
+
+ if(boss.shootCooldown>0) boss.shootCooldown--;
+
+ explosions.forEach((e,i)=>{e.r+=3;if(e.r>35)explosions.splice(i,1)});
+
+ if(player.hp<=0) show("GAME OVER");
+
+ php.style.width=(player.hp/PLAYER_HP*100)+"%";
+ bhp.style.width=(boss.hp/BOSS_HP*100)+"%";
+}
+
+// ================= DRAW =================
+function draw(){
+ ctx.save();
+ if(shake>0){
+  ctx.translate(Math.random()*shake-shake/2,Math.random()*shake-shake/2);
+  shake*=0.9;
+ }
+ ctx.clearRect(0,0,500,650);
+
+ ctx.fillStyle="lime";
+ ctx.fillRect(player.x,player.y,40,40);
+
+ ctx.fillStyle="yellow";
+ bullets.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+
+ ctx.fillStyle="red";
+ bossBullets.forEach(b=>ctx.fillRect(b.x,b.y,b.w,b.h));
+
+ ctx.fillStyle="purple";
+ ctx.fillRect(boss.x,boss.y,boss.w,boss.h);
+
+ ctx.strokeStyle="orange";
+ explosions.forEach(e=>{
+  ctx.beginPath();
+  ctx.arc(e.x,e.y,e.r,0,Math.PI*2);
+  ctx.stroke();
+ });
+
+ ctx.restore();
+}
+
+// ================= LOOP =================
+(function loop(){
+ update();
+ draw();
+ requestAnimationFrame(loop);
+})();
+
+// ================= UI =================
+function show(text){
+ gameOver=true;
+ overlay.style.display="flex";
+ msg.textContent=text;
+}
+</script>
+</body>
+</html>
